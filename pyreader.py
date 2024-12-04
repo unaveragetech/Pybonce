@@ -8,7 +8,7 @@ from tkinter.ttk import Progressbar
 import webbrowser
 import shutil
 from PyCells import Brain_matter
-
+from ollama import chat
 
 openai.api_key = config.API_KEY
 memory = Brain_matter()
@@ -210,6 +210,7 @@ def process_directory(directory):
 
 
 def establish_context(lines, filename):
+    # Construct the prompt
     prompt = (f"Thoroughly analyze the Python script named '{filename}' as if you are a seasoned Python and Windows expert. "
               "For each section or line of code, provide detailed feedback segmented into the following categories:\n"
               "- **Performance**: Are there any inefficiencies? How can they be optimized?\n"
@@ -217,43 +218,44 @@ def establish_context(lines, filename):
               "- **Security**: Are there potential vulnerabilities or unsafe practices?\n"
               "- **Functionality**: Are there potential bugs or areas of improvement in the logic?\n"
               "For each suggestion, explain the reasoning behind it. If a section is already optimal, acknowledge it. "
-              "For place holders in .py files show best possible viable code based on previous suggestions"
+              "For placeholders in .py files, show the best possible viable code based on previous suggestions."
               "Ensure a comprehensive review.\n\n"
               "After the analysis, provide a section titled 'MODIFICATIONS' where you list all the specific changes to be made to the code. "
               "Begin the analysis:\n\n" + "".join(lines))
-    response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
-        messages=[
-            {"role": "system", "content": "You are a helpful assistant with skills as if you are a seasoned Python and Windows expert."},
-            {"role": "user", "content": prompt}
-        ]
+    
+    # Use Ollama's Python bindings to process the prompt
+    stream = chat(
+        model='llama3.2',  # Specify the model name you want to use
+        messages=[{'role': 'user', 'content': prompt}],
+        stream=True
     )
-
-    tokens_used = response['usage']['total_tokens']
-    estimated_cost = (tokens_used / 1000) * TOKEN_COST_PER_THOUSAND
-
-    context = response.choices[0].message['content'].strip()
+    
+    # Collect the streamed response
+    context = ""
+    for chunk in stream:
+        context += chunk['message']['content']
+    
+    # Tokens and cost estimations are placeholders, as Ollama does not directly provide token counts
+    tokens_used = len(prompt.split()) + len(context.split())
+    estimated_cost = 0  # Update this logic if cost estimation for Ollama is needed
+    
     highlighted_lines = [context]
 
     # Log the analysis results based on content type
     if "NOTE:" in context:
         write_log(context, log_type=config.LOG_TYPES["notes"])
-        # Save a memory for the type of feedback
         memory.save_memory(f"Feedback type: NOTE for script {filename}.")
     elif "MODIFICATION:" in context:
         write_log(context, log_type=config.LOG_TYPES["modifications"])
-        # Save a memory for the type of feedback
         memory.save_memory(f"Feedback type: MODIFICATION for script {filename}.")
     else:
         write_log(context, log_type=config.LOG_TYPES["default"])
 
     # Save a memory for the script analysis
     memory.save_memory(f"Analyzed script: {filename}. Tokens used: {tokens_used}. Estimated cost: ${estimated_cost:.2f}.", "script_analysis")
-    # Save a memory for the estimated cost of the analysis
     memory.save_memory(f"Estimated cost for analyzing {filename}: ${estimated_cost:.2f}.", "analysis_cost")
 
     return [context], highlighted_lines, tokens_used, estimated_cost
-
 
 
 
